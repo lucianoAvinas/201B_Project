@@ -181,7 +181,7 @@ def match_and_convert(datadir, movie_info, min_matching):
 
     return movie_info
 
-import time
+
 def save_rdata(datadir='data', min_matching=0.3):
     # Get MovieGalaxies Dataset
     get_movie_dataset(datadir)
