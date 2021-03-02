@@ -4,3 +4,5 @@
 data/
 ergm.userterms/
 ergm.userterms_3.10.0.tar.gz
+eta_bank/*
+!eta_bank/.gitkeep
