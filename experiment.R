@@ -36,7 +36,7 @@ simulate_obs <- function(nets, sample_per_obs, feat_formula,
 
 
 fisher_info <- function(eta, eta0, Z_sims) {
-	w <- Z_sims %*% (eta-eta0)
+    w <- Z_sims %*% (eta-eta0)
     w <- exp(w - max(w))
     w <- w/sum(w)
 
@@ -52,7 +52,7 @@ fisher_info <- function(eta, eta0, Z_sims) {
 
 
 mom_sgd_ergm <- function(nets, feat_formula, ref_formula, eta, 
-	                     l_iter, beta, lr_func, use_print){
+                         l_iter, beta, lr_func, use_print){
     eta <- eta / norm(eta, type='2')
 
     n <- length(nets)
@@ -60,14 +60,14 @@ mom_sgd_ergm <- function(nets, feat_formula, ref_formula, eta,
     sp <- paste(rep(' ', 2), collapse='')
 
     if (use_print){
-    	cat('(iter, step, net) eta = (',eta,')','\n')
+        cat('(iter, step, net) eta = (',eta,')','\n')
     }
 
     mom <- 0 # will be vector later by broadcasting
     for (i in 1:l_iter) {
         inds <- sample(1:n)
         for (j in inds) {
-        	eta_prev <- eta
+            eta_prev <- eta
 
             step <- step + 1 
             sgd <- suppress_messages(ergm(update(nets[[j]]~.,feat_formula), 
@@ -79,7 +79,7 @@ mom_sgd_ergm <- function(nets, feat_formula, ref_formula, eta,
 
             eta <- eta / norm(eta, type='2')
             if (use_print) {
-            	cat(sp,' (',i,step,j,')',sp,' eta = (',eta,')','\n')
+                cat(sp,' (',i,step,j,')',sp,' eta = (',eta,')','\n')
                 cat(sp,sp,'eta diff =',norm(eta-eta_prev, type='2'),'\n')
             }
         }
@@ -89,7 +89,7 @@ mom_sgd_ergm <- function(nets, feat_formula, ref_formula, eta,
 
 
 eta_distributional <- function(nets, feat_formula, ref_formula, eta, 
-	                           l_iter, gamma, sample_per_obs, use_print){
+                               l_iter, gamma, sample_per_obs, use_print){
     eta <- eta / norm(eta, type='2')
 
     # Product of multiples obsv. in log turns into a sum
@@ -116,7 +116,7 @@ eta_distributional <- function(nets, feat_formula, ref_formula, eta,
         eta <- eta / norm(eta, type='2')
 
         if (use_print) {
-        	cat('iter =',i,', eta = (',eta,')','\n')
+            cat('iter =',i,', eta = (',eta,')','\n')
             cat('eta diff',norm(eta-eta_prev, type='2'),'\n')
         } 
     }
@@ -125,53 +125,70 @@ eta_distributional <- function(nets, feat_formula, ref_formula, eta,
 
 
 robust.llk.rel <- function(eta, eta_prev, Z_nets, Z_sims){
-	# Suggested in Hummel's Improving Simulation.. end of Section 2
-	eta_diff <- eta - eta_prev
-	etaZ <- Z_sims %*% eta_diff
+    # Suggested in Hummel's Improving Simulation.. end of Section 2
+    eta_diff <- eta - eta_prev
+    etaZ <- Z_sims %*% eta_diff
 
-	mu_hat <- median(etaZ)
-	var_hat <- 1.483 * median(abs(etaZ - mu_hat))
-	llk_avg <- mean(Z_nets %*% eta_diff) - mu_hat - var_hat/2
+    mu_hat <- median(etaZ)
+    var_hat <- 1.483 * median(abs(etaZ - mu_hat))
+    llk_avg <- mean(Z_nets %*% eta_diff) - mu_hat - var_hat/2
 
-	llk_avg
+    llk_avg
 }
 
 
-eta_MCMCvar <- function(eta, eta_prev, Z_sims) {
-	# Assumes MCMC draws are uncorrelated
-	# Need to consider auto-cov lag if not
-	m <- nrow(Z_sims)
+eta_MCMC_Handcock <- function(eta, eta_prev, Z_sims) {
+    # Assumes MCMC draws are uncorrelated
+    # Need to consider auto-cov lag if not
+    m <- nrow(Z_sims)
 
-	Ihat_inv <- fisher_info(eta, eta_prev, Zsim_sel)
-	expZ <- exp(Zsim_sel %*% eta_diff)/m
-	var_tilde <- (expZ %*% expZ) * (Ihat_inv %*% Ihat_inv) / m
+    Ihat_inv <- fisher_info(eta, eta_prev, Z_sims)
+    expZ <- sum(Z_sims %*% (eta_prev - eta))/m # eta_diff is reverse here
+    var_tilde <- expZ^2 * (Ihat_inv %*% Ihat_inv) / m
 
-	var_tilde
+    var_tilde
+}
+
+eta_MCMCvar <- function(m_sims, Z_sims) {
+    # Assumes MCMC draws are uncorrelated
+    # Need to consider auto-cov lag if not
+    n <- as.integer(nrow(Z_sims)/m_sims)
+    var_tilde <- 0
+    for (i in 1:n) {
+        Z_sel <- Z_sims[(1+(i-1)*m_sims):(i*m_sims),]
+        var_tilde <- var_tilde + solve(var(Z_sel))
+    }
+
+    var_tilde/n
 }
 
 
-fit_eta <- function(train_nets, method, method_args) {
-	if (method == 'momentum') {
-		eta_pair <- mom_sgd_ergm(train_nets, method_args$feat_formula, 
-			                     method_args$ref_formula, method_args$eta, 
-	                             method_args$l_iter, method_args$beta, 
-	                             method_args$lr_func, method_args$use_print)
-	} else {
-		eta_pair <- eta_distributional(train_nets, method_args$feat_formula, 
-			                           method_args$ref_formula, method_args$eta, 
-	                                   method_args$l_iter, method_args$gamma, 
-	                                   method_args$sample_per_obs, 
-	                                   method_args$use_print)
-	}
-	
-	eta_pair
+fit_eta <- function(train_nets, net_initializer, method, method_args) {
+    train_nets <- net_initializer(train_nets)
+
+    if (method == 'momentum') {
+        eta_pair <- mom_sgd_ergm(train_nets, method_args$feat_formula, 
+                                 method_args$ref_formula, method_args$eta, 
+                                 method_args$l_iter, method_args$beta, 
+                                 method_args$lr_func, method_args$use_print)
+    } else {
+        eta_pair <- eta_distributional(train_nets, method_args$feat_formula, 
+                                       method_args$ref_formula, method_args$eta, 
+                                       method_args$l_iter, method_args$gamma, 
+                                       method_args$sample_per_obs, 
+                                       method_args$use_print)
+    }
+    cat('eta:', eta_pair$eta, '\n')
+    eta_pair
 }
 
 
-run_test <- function(test_nets, eta_pair, feat_formula, ref_formula,
-	                 sims_per_val) {
-	n <- length(test_nets)
-	Z_nets <- matrix(rep(0, n*eta_pair[[1]]), nrow=n)
+run_test <- function(test_nets, net_initializer, eta_pair, feat_formula, ref_formula,
+                     sims_per_val) {
+    n <- length(test_nets)
+    test_nets <- net_initializer(test_nets)
+
+    Z_nets <- matrix(rep(0, n*length(eta_pair[[1]])), nrow=n)
     for(i in 1:n){
         Z_nets <- summary(update(test_nets[[i]]~., feat_formula),
                                  response='e_weights')
@@ -181,87 +198,121 @@ run_test <- function(test_nets, eta_pair, feat_formula, ref_formula,
     # We have chosen the second last eta to be our eta0
     # If we have convergence or near convergence this should be ok
     Z_sims <- simulate_obs(test_nets, sims_per_val, feat_formula, 
-    	                   ref_formula, eta_pair$eta_prev)
+                           ref_formula, eta_pair$eta_prev)
     
     # llk increases with number of samples, better to look at average
     llk_avg <- robust.llk.rel(eta_pair$eta, eta_pair$eta_prev, Z_nets, Z_sims)
-    eta_var <- eta_MCMCvar(eta_pair$eta, eta_pair$eta_prev, Z_sims)
-    pvals <- 2*pnorm(-abs(eta_pair$eta/sqrt(diag(eta_var))))
+    eta_var <- eta_MCMCvar(sims_per_val, Z_sims)
+    SE <- sqrt(diag(eta_var))
+    pvals <- 2*pnorm(-abs(eta_pair$eta/SE))
 
-    print('llk_avg:', llk_avg)
-    print('pvals:', pvals)
+    cat('llk_avg:', llk_avg, '\n')
+    cat('pvals:', pvals, '\n')
 
     list(llk_avg=llk_avg, SE=SE, pvals=pvals)
 }
 
-fit_and_val <- function(genre, n_train, n_val, method, method_args, 
-	                    sims_per_val, save_name) {
-	nets <- nets_in_genre(genre)
-	set.seed(5)
-	nets <- nets[sample(length(nets))]
+fit_and_val <- function(genre, save_name, n_train, n_val, sims_per_val,
+                        method, net_initializer, method_args) {
+    nets <- nets_in_genre(genre)
+    set.seed(5)
+    nets <- nets[sample(length(nets))]
 
-	train_nets <- nets[1:n_train]
-	val_nets <- nets[(n_train+1):(n_train+n_val)]
+    train_nets <- nets[1:n_train]
+    val_nets <- nets[(n_train+1):(n_train+n_val)]
 
-	eta_pair <- fit_eta(train_nets, method, save_name, extra_args)
-	val_res <- run_test(val_nets, eta_pair, method_args$feat_formula,
-		                method_args$ref_formula, sims_per_val)
+    eta_pair <- fit_eta(train_nets, net_initializer, method, method_args)
+    val_res <- run_test(val_nets, net_initializer, eta_pair, 
+                        method_args$feat_formula, method_args$ref_formula, 
+                        sims_per_val)
 
-	save('all_eta_save_info', list(eta_pair=eta_pair, val_res=val_res, 
-		  genre=genre, n_train=n_train, n_val=n_val, method=method, 
-		  method_args=method_args, sims_per_val=sims_per_val),
-	      file=file.path('eta_bank', save_name))
+    all_eta_save_info <- list(eta_pair=eta_pair, val_res=val_res, 
+          genre=genre, n_train=n_train, n_val=n_val, method=method, 
+          method_args=method_args, sims_per_val=sims_per_val,
+          net_initializer=net_initializer)
+    save(all_eta_save_info, file=file.path('eta_bank', 
+                                 paste0(save_name, '.RData')))
 
-	list(eta_pair=eta_pair, val_res=val_res)
+    list(eta_pair=eta_pair, val_res=val_res)
 }
 
-test_eta <- function(n_test, sims_per_test, save_name){
-    load(file.path('eta_bank', save_name))
+test_eta <- function(save_name, n_test, sims_per_test){
+    load(file.path('eta_bank', paste0(save_name, '.RData')))
     genre <- all_eta_save_info$genre
     n_train <- all_eta_save_info$n_train
     n_val <- all_eta_save_info$n_val
+    net_initializer <- all_eta_save_info$net_initializer
 
-	nets <- nets_in_genre(genre)
-	set.seed(5)
-	nets <- nets[sample(length(nets))]
-	test_nets <- nets[(n_train+n_val+1):(n_train+n_val+n_test)]
+    nets <- nets_in_genre(genre)
+    set.seed(5)
+    nets <- nets[sample(length(nets))]
+
+    test_nets <- nets[(n_train+n_val+1):(n_train+n_val+n_test)]
 
     
     feat_formula <- all_eta_save_info$method_args$feat_formula
     ref_formula <- all_eta_save_info$method_args$ref_formula
     eta_pair <- all_eta_save_info$eta_pair
-	test_res <- run_test(test_nets, eta_pair, feat_formula,
-		                 ref_formula, sims_per_test)
+    test_res <- run_test(test_nets, net_initializer, eta_pair, 
+                         feat_formula, ref_formula, sims_per_test)
 
-	test_res
+    test_res
 }
 
 view_sims <- function(save_name, net_index, n_sims) {
-	load(file.path('eta_bank', save_name))
-	eta <- all_eta_save_info$eta_pair$eta
-	genre <- all_eta_save_info$genre
-	feat_formula <- all_eta_save_info$method_args$feat_formula
+    load(file.path('eta_bank', paste0(save_name, '.RData')))
+
+    eta <- all_eta_save_info$eta_pair$eta
+    genre <- all_eta_save_info$genre
+    feat_formula <- all_eta_save_info$method_args$feat_formula
     ref_formula <- all_eta_save_info$method_args$ref_formula
+    net_initializer <- all_eta_save_info$net_initializer
 
-	nets <- nets_in_genre(genre)
-	net_sims <- simulate(feat_formula, coef=eta, nsim=n_sims,
+    nets <- nets_in_genre(genre)
+    set.seed(5)
+    nets <- nets[sample(length(nets))]
+
+    net_i <- net_initializer(nets[net_index])[[1]]
+
+    net_sims <- simulate(feat_formula, coef=eta, nsim=n_sims,
                          response='e_weights', reference=ref_formula,
-                         basis=nets[[net_index]])
+                         basis=net_i)
     Z_sims <- summary(update(net_sims~., feat_formula), response='e_weights')
-    Z_net <- summary(update(nets[[net_index]]~., feat_formula), response='e_weights')
+    Z_net <- summary(update(net_i~., feat_formula), response='e_weights')
 
-    k <- length(eta)
-    height <- as.integer(sqrt(k))
-    par(mfrom=c(height, 2*round(k/height)))
     variable_names <- labels(terms(feat_formula))
+    k <- length(variable_names)
+    height <- round(sqrt(k))
+    par(mfrow=c(height, 2*round(k/height)))
     for (i in 1:k) {
-    	plot(1:n_sims, Z_sims[,i]-Z_net[i],type='l', xlab=NULL, main=paste(
-    		 'MCMC Convergence:', variable_names[[i]])
+        plot(1:n_sims, Z_sims[,i]-Z_net[i],type='l', xlab=NULL, main=paste(
+             'MCMC Convergence:', variable_names[[i]]))
         abline(h=0,col='red',lwd=2)
         plot(density(Z_sims[,i]-Z_net[i]), main=paste('Density plot:', 
-        	                                          variable_names[[i]]))
+                                                      variable_names[[i]]))
     }
 }
 
 
+add_groups <- function(nets) {
+    for (i in 1:length(nets)) {
+        char_groups <- cut(nets[[i]] %v% 'ranks', c(1,4,8,Inf), 
+                           include.lowest=T, ordered.result=T)
+        nets[[i]] %v% 'char_groups' <- as.integer(char_groups)
+    }
+    nets
+}
 
+
+set.seed(3)
+# fit_and_val('Drama', 'test', 20, 5, 1000, 'momentum', add_groups,
+#            list(feat_formula=~absdiffcat('char_groups')+sum+edges, 
+#                 ref_formula=~Poisson, eta=rnorm(4), l_iter=10, 
+#                 beta=0.95, lr_func=function(x) 1e-2*exp(-(x-1)/2), 
+#                 use_print=TRUE))
+# view_sims('test', 10, 1000)
+
+# fit_and_val('Drama', 'test', 10, 5, 1000, 'dist', add_groups,
+#            list(feat_formula=~absdiffcat('char_groups')+sum+edges, 
+#                 ref_formula=~Poisson, eta=rnorm(4), l_iter=10, 
+#                 gamma=0.5, sample_per_obs=1000, use_print=TRUE))
