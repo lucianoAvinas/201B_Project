@@ -259,37 +259,47 @@ test_eta <- function(save_name, n_test, sims_per_test){
     test_res
 }
 
-view_sims <- function(save_name, net_index, n_sims) {
+view_val_sims <- function(save_name) {
+    ## Jumps in MCMC correspond to different net sims
+    ## We want correct behavior on average
+    ## abline is this average
     load(file.path('eta_bank', paste0(save_name, '.RData')))
 
     eta <- all_eta_save_info$eta_pair$eta
     genre <- all_eta_save_info$genre
     feat_formula <- all_eta_save_info$method_args$feat_formula
     ref_formula <- all_eta_save_info$method_args$ref_formula
+    n_train <- all_eta_save_info$n_train
+    n_val <- all_eta_save_info$n_val
+    sims_per_val <- all_eta_save_info$sims_per_val
     net_initializer <- all_eta_save_info$net_initializer
 
     nets <- nets_in_genre(genre)
     set.seed(5)
     nets <- nets[sample(length(nets))]
 
-    net_i <- net_initializer(nets[net_index])[[1]]
+    nets <- net_initializer(nets[(n_train+1):(n_train+n_val)])
+    Z_sims <- simulate_obs(nets, sims_per_val, feat_formula, 
+                           ref_formula, eta)
 
-    net_sims <- simulate(feat_formula, coef=eta, nsim=n_sims,
-                         response='e_weights', reference=ref_formula,
-                         basis=net_i)
-    Z_sims <- summary(update(net_sims~., feat_formula), response='e_weights')
-    Z_net <- summary(update(net_i~., feat_formula), response='e_weights')
+    Z_avg <- 0 
+    for(i in 1:length(nets)){
+        Z_avg <- Z_avg + summary(update(nets[[i]]~., feat_formula),
+                                        response='e_weights')
+    }
+    Z_avg <- Z_avg/length(nets)
 
     variable_names <- labels(terms(feat_formula))
     k <- length(variable_names)
     height <- round(sqrt(k))
     par(mfrow=c(height, 2*round(k/height)))
     for (i in 1:k) {
-        plot(1:n_sims, Z_sims[,i]-Z_net[i],type='l', xlab=NULL, main=paste(
+        Z_diff <- Z_sims[,i]-Z_avg[i]
+        plot(1:nrow(Z_sims), Z_diff,type='l', xlab=NULL, main=paste(
              'MCMC Convergence:', variable_names[[i]]))
-        abline(h=0,col='red',lwd=2)
-        plot(density(Z_sims[,i]-Z_net[i]), main=paste('Density plot:', 
-                                                      variable_names[[i]]))
+        abline(h=mean(Z_diff),col='red',lwd=2)
+        plot(density(Z_diff), main=paste('Density plot:', 
+                                         variable_names[[i]]))
     }
 }
 
@@ -307,12 +317,12 @@ add_groups <- function(nets) {
 set.seed(3)
 # fit_and_val('Drama', 'test', 20, 5, 1000, 'momentum', add_groups,
 #            list(feat_formula=~absdiffcat('char_groups')+sum+edges, 
-#                 ref_formula=~Poisson, eta=rnorm(4), l_iter=10, 
+#                 ref_formula=~Poisson, eta=rnorm(4), l_iter=5, 
 #                 beta=0.95, lr_func=function(x) 1e-2*exp(-(x-1)/2), 
 #                 use_print=TRUE))
-# view_sims('test', 10, 1000)
+#view_val_sims('test')
 
 # fit_and_val('Drama', 'test', 10, 5, 1000, 'dist', add_groups,
 #            list(feat_formula=~absdiffcat('char_groups')+sum+edges, 
-#                 ref_formula=~Poisson, eta=rnorm(4), l_iter=10, 
+#                 ref_formula=~Poisson, eta=rnorm(4), l_iter=5, 
 #                 gamma=0.5, sample_per_obs=1000, use_print=TRUE))
