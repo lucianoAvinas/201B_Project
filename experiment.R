@@ -91,6 +91,7 @@ mom_sgd_ergm <- function(nets, feat_formula, ref_formula, eta,
 eta_distributional <- function(nets, feat_formula, ref_formula, eta, 
                                l_iter, gamma, sample_per_obs, use_print){
     eta <- eta / norm(eta, type='2')
+    cat('initial eta = (',eta,')','\n')
 
     # Product of multiples obsv. in log turns into a sum
     # Going through the math will ultimately have division by 
@@ -185,6 +186,7 @@ fit_eta <- function(train_nets, net_initializer, method, method_args) {
 
 run_test <- function(test_nets, net_initializer, eta_pair, feat_formula, ref_formula,
                      sims_per_val) {
+    # Compare to zero eta
     n <- length(test_nets)
     test_nets <- net_initializer(test_nets)
 
@@ -194,14 +196,12 @@ run_test <- function(test_nets, net_initializer, eta_pair, feat_formula, ref_for
                                  response='e_weights')
     }
 
-    # llk estimate only holds for eta0 close to eta
-    # We have chosen the second last eta to be our eta0
-    # If we have convergence or near convergence this should be ok
+
     Z_sims <- simulate_obs(test_nets, sims_per_val, feat_formula, 
-                           ref_formula, eta_pair$eta_prev)
+                           ref_formula, eta_pair$eta)
     
     # llk increases with number of samples, better to look at average
-    llk_avg <- robust.llk.rel(eta_pair$eta, eta_pair$eta_prev, Z_nets, Z_sims)
+    llk_avg <- robust.llk.rel(eta_pair$eta, rep(0, length(eta_pair$eta)), Z_nets, Z_sims)
     eta_var <- eta_MCMCvar(sims_per_val, Z_sims)
     SE <- sqrt(diag(eta_var))
     pvals <- 2*pnorm(-abs(eta_pair$eta/SE))
@@ -306,23 +306,32 @@ view_val_sims <- function(save_name) {
 
 add_groups <- function(nets) {
     for (i in 1:length(nets)) {
-        char_groups <- cut(nets[[i]] %v% 'ranks', c(1,4,8,Inf), 
-                           include.lowest=T, ordered.result=T)
+        char_groups <- cut(nets[[i]] %v% 'ranks', c(1,2,6,Inf), 
+                           right=F, ordered.result=T)
         nets[[i]] %v% 'char_groups' <- as.integer(char_groups)
+        main_v_misc <- cut(nets[[i]] %v% 'ranks', c(1,6,Inf), 
+                           right=F, ordered.result=T)
+        nets[[i]] %v% 'main_v_misc' <- as.integer(main_v_misc)
     }
     nets
 }
 
 
 set.seed(3)
-# fit_and_val('Drama', 'test', 20, 5, 1000, 'momentum', add_groups,
-#            list(feat_formula=~absdiffcat('char_groups')+sum+edges, 
-#                 ref_formula=~Poisson, eta=rnorm(4), l_iter=5, 
-#                 beta=0.95, lr_func=function(x) 1e-2*exp(-(x-1)/2), 
-#                 use_print=TRUE))
+fit_and_val('Drama', 'drama_fit', 50, 20, 1000, 'momentum', add_groups,
+            list(feat_formula=~nodematch('main_v_misc')+
+                               absdiffcat('char_groups',levels=-3)+
+                               atmost(threshold=2)+
+                               nodesqrtcovar(center=TRUE), 
+                 ref_formula=~Poisson, eta=rnorm(5), l_iter=5, 
+                 beta=0.3, lr_func=function(x) 1e-1*exp(-(x-1)/2), 
+                 use_print=TRUE))
 #view_val_sims('test')
 
-# fit_and_val('Drama', 'test', 10, 5, 1000, 'dist', add_groups,
-#            list(feat_formula=~absdiffcat('char_groups')+sum+edges, 
-#                 ref_formula=~Poisson, eta=rnorm(4), l_iter=5, 
+#fit_and_val('Drama', 'test', 10, 5, 1000, 'dist', add_groups,
+#            list(feat_formula=~nodematch('main_v_misc')+
+#                               absdiffcat('char_groups',levels=-3)+
+#                               atmost(threshold=2)+
+#                               nodesqrtcovar(center=TRUE), 
+#                 ref_formula=~Poisson, eta=rnorm(5), l_iter=5, 
 #                 gamma=0.5, sample_per_obs=1000, use_print=TRUE))
