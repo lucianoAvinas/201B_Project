@@ -52,7 +52,7 @@ fisher_info <- function(eta, eta0, Z_sims) {
 
 
 mom_sgd_ergm <- function(nets, feat_formula, ref_formula, eta, 
-                         l_iter, beta, lr_func, use_print){
+                         l_iter, beta, lr_func, use_print, expect_NA){
     eta <- eta / norm(eta, type='2')
 
     n <- length(nets)
@@ -74,11 +74,21 @@ mom_sgd_ergm <- function(nets, feat_formula, ref_formula, eta,
                           coef=eta, response='e_weights', reference=ref_formula,
                           control=control.ergm(CD.maxit=1, MCMLE.maxit=1, 
                           MCMLE.termination='none')))$gradient
+            if (expect_NA > 0) {
+                sgd <- sgd[-expect_NA]
+            }
+            more_NA <- is.na(sgd)
+            if (any(more_NA)) {
+                NA_inds <- which(more_NA)
+                sgd[NA_inds] <- 0
+                cat('Some NA at indices', NA_inds, '\n')
+            }
             mom <- beta*mom + sgd
             eta <- eta + lr_func(i)*mom
 
             eta <- eta / norm(eta, type='2')
             if (use_print) {
+                #cat(sgd,'\n')
                 cat(sp,' (',i,step,j,')',sp,' eta = (',eta,')','\n')
                 cat(sp,sp,'eta diff =',norm(eta-eta_prev, type='2'),'\n')
             }
@@ -171,7 +181,8 @@ fit_eta <- function(train_nets, net_initializer, method, method_args) {
         eta_pair <- mom_sgd_ergm(train_nets, method_args$feat_formula, 
                                  method_args$ref_formula, method_args$eta, 
                                  method_args$l_iter, method_args$beta, 
-                                 method_args$lr_func, method_args$use_print)
+                                 method_args$lr_func, method_args$use_print,
+                                 method_args$expect_NA)
     } else {
         eta_pair <- eta_distributional(train_nets, method_args$feat_formula, 
                                        method_args$ref_formula, method_args$eta, 
@@ -319,13 +330,12 @@ add_groups <- function(nets) {
 
 set.seed(3)
 fit_and_val('Drama', 'drama_fit', 50, 20, 1000, 'momentum', add_groups,
-            list(feat_formula=~nodematch('main_v_misc')+
-                               absdiffcat('char_groups',levels=-3)+
+            list(feat_formula=~nodemix('char_groups')+
                                atmost(threshold=2)+
                                nodesqrtcovar(center=TRUE), 
-                 ref_formula=~Poisson, eta=rnorm(5), l_iter=5, 
-                 beta=0.3, lr_func=function(x) 1e-1*exp(-(x-1)/2), 
-                 use_print=TRUE))
+                 ref_formula=~Poisson, eta=rnorm(7), l_iter=5, 
+                 beta=0.99, lr_func=function(x) 1e-2*exp(-(x-1)/2), 
+                 use_print=TRUE, expect_NA=1))
 #view_val_sims('test')
 
 #fit_and_val('Drama', 'test', 10, 5, 1000, 'dist', add_groups,

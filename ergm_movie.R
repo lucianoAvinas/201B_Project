@@ -259,4 +259,4 @@ example_methods <- function(method, extra.args=NULL) {
 }
 
 # Try plotting loglik to see effect of mom
-example_methods(3)
+#example_methods(3)
