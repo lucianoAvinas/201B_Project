@@ -379,16 +379,19 @@ fit_and_val('Drama', 'drama_fit', 50, 20, 1000, 'momentum', add_groups,
             list(feat_formula=~nodemix('char_groups')+
                                atleast(threshold=3)+
                                nodesqrtcovar(center=TRUE), 
-                 ref_formula=~Poisson, eta=rep(1,7), l_iter=3,#5, 
-                 beta=0, lr_func=function(x) 1e-2,#*exp(-(x-1)), 
+                 ref_formula=~Poisson, eta=rep(1,7), l_iter=3, 
+                 beta=0, lr_func=function(x) 1e-2*exp(-(x-1)), 
                  use_print=TRUE, expect_NA=c(1)))
+# comedy_fit used 9e-3*exp(-(x-1)) learning rate and eta=c(1,1,1,0.5,1,1,1)
 
 #view_val_sims('drama_fit')
+
+#test_eta('comedy_fit', 20, 1000)
 
 #fit_and_val('Drama', 'test', 10, 5, 1000, 'dist', add_groups,
 #            list(feat_formula=~nodemix('char_groups')+
 #                               ininterval(lower=1, upper=3, open=c(FALSE,FALSE))+
 #                               nodesqrtcovar(center=TRUE), 
-#                 ref_formula=~Poisson, eta=rnorm(7), l_iter=5, 
+#                 ref_formula=~Poisson, eta=rnorm(7), l_iter=3, 
 #                 gamma=0.5, sample_per_obs=1000, use_print=TRUE,
 #                 expect_NA=c(1)))
