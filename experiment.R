@@ -35,22 +35,6 @@ simulate_obs <- function(nets, sample_per_obs, feat_formula,
 }
 
 
-fisher_info <- function(eta, eta0, Z_sims) {
-    w <- Z_sims %*% (eta-eta0)
-    w <- exp(w - max(w))
-    w <- w/sum(w)
-
-    wZ <- array(w, dim(Z_sims)) * Z_sims
-    wZ_colsum <- colSums(wZ)
-    wZZ_sum <- t(wZ) %*% Z_sims
-
-    I_hat <- wZZ_sum - (matrix(wZ_colsum, ncol=1) %*% wZ_colsum)
-    f_info <- solve(I_hat)
-
-    f_info
-}
-
-
 mom_sgd_ergm <- function(nets, feat_formula, ref_formula, eta, 
                          l_iter, beta, lr_func, use_print, expect_NA){
     #eta <- eta / norm(eta, type='2')
@@ -58,6 +42,7 @@ mom_sgd_ergm <- function(nets, feat_formula, ref_formula, eta,
     n <- length(nets)
     step <- 0
     sp <- paste(rep(' ', 2), collapse='')
+    #trust <- 75
 
     if (use_print){
         cat('(iter, step, net) eta = (',eta,')','\n')
@@ -77,8 +62,9 @@ mom_sgd_ergm <- function(nets, feat_formula, ref_formula, eta,
             }
             sgd <- suppress_messages(ergm(update(nets[[j]]~.,feat_formula), 
                           coef=padded_eta, response='e_weights', 
-                          reference=ref_formula, control=control.ergm(CD.maxit=1, 
+                          reference=ref_formula, control=control.ergm(CD.maxit=1,
                           MCMLE.maxit=1, MCMLE.termination='none')))$gradient
+        
             if (length(expect_NA) > 0) {
                 sgd <- sgd[-expect_NA]
             }
@@ -88,6 +74,10 @@ mom_sgd_ergm <- function(nets, feat_formula, ref_formula, eta,
                 sgd[NA_inds] <- 0
                 cat('Some NA at indices:', NA_inds, '\n')
             }
+            #if (norm(sgd, type='2') > trust) {
+            #    cat('Sgd over trust with norm', norm(sgd, type='2'), '\n')
+            #    sgd <- 0
+            #}
             mom <- beta*mom + sgd
             eta <- eta + lr_func(i)*mom
 
@@ -176,29 +166,83 @@ robust.llk.rel <- function(eta, eta_prev, Z_nets, Z_sims){
 }
 
 
-eta_MCMC_Handcock <- function(eta, eta_prev, Z_sims) {
-    # Assumes MCMC draws are uncorrelated
-    # Need to consider auto-cov lag if not
+ergm_MCMCtranslate <- function(eta, Z_sims) {
+    av <- apply(Z_sims, 2, mean)
+    Z_sims <- sweep(Z_sims, 2, av, "-")
+
+    basepred <- Z_sims %*% eta
+    prob <- max(basepred)
+    prob <- exp(basepred - prob)
+    prob <- prob/sum(prob)
+    g_sim <- Z_sims
+    E <- apply(sweep(g_sim, 1, prob, "*"), 2, sum)
+
+    htmp <- sweep(sweep(g_sim, 2, E, "-"), 1, sqrt(prob), "*")
+    H <- crossprod(htmp, htmp)
+    cat('H', diag(H),'\n')
+
+    cov.zbar <- spectrum0.mvar(g_sim) * sum(prob^2)
+    cat('cov.zbar', diag(cov.zbar),'\n')
+    mc.cov <- solve(H, cov.zbar, tol=1e-20)
+    mc.cov <- solve(H, t(mc.cov), tol=1e-20)
+    
+    cat('mc.cov',diag(mc.cov),'\n\n')
+    mc.cov
+} 
+
+
+eta_MCMC_Handcock <- function(eta, Z_nets, Z_sims) {
     m <- nrow(Z_sims)
 
-    Ihat_inv <- fisher_info(eta, eta_prev, Z_sims)
-    expZ <- sum(Z_sims %*% (eta_prev - eta))/m # eta_diff is reverse here
-    var_tilde <- expZ^2 * (Ihat_inv %*% Ihat_inv) / m
+    w0 <- Z_sims %*% eta
+    w <- exp(w0 - max(w0))
+    w <- w/sum(w)
 
-    var_tilde
+    wZ <- array(w, dim(Z_sims)) * Z_sims
+    wZ_colsum <- colSums(wZ)
+    wZZ_sum <- t(wZ) %*% Z_sims
+
+    I_hat <- wZZ_sum - (matrix(wZ_colsum, ncol=1) %*% wZ_colsum)
+    cat('I_hat', diag(I_hat), '\n')
+
+    W_i <- -sweep(Z_sims, 2, Z_nets, '-')
+    #W_i <- array(w, dim(Z_sims)) * W_i
+
+    #V_tilde <- colSums(acf(W_i, type='covariance', plot=F)$acf)/m^2
+    V_tilde <- spectrum0.mvar(W_i)/m
+
+    cat('V_tilde', diag(V_tilde), '\n\n')
+    #cat('V_oth', diag(V_oth), '\n')
+    #mc.cov <- solve(I_hat, V_tilde, tol=1e-20)
+    #mc.cov <- solve(I_hat, t(mc.cov), tol=1e-20)/m
+    #cat('mc.cov', diag(mc.cov),'\n')
+    #mc.cov
+    list(I_hat=I_hat, V_tilde=V_tilde)
 }
 
-eta_MCMCvar <- function(m_sims, Z_sims) {
-    # Assumes MCMC draws are uncorrelated
-    # Need to consider auto-cov lag if not
-    n <- as.integer(nrow(Z_sims)/m_sims)
-    var_tilde <- 0
-    for (i in 1:n) {
-        Z_sel <- Z_sims[(1+(i-1)*m_sims):(i*m_sims),]
-        var_tilde <- var_tilde + solve(var(Z_sel))
-    }
 
-    var_tilde/n
+ergm_MCMCcov <- function(m_sims, eta, Z_sims, Z_nets) {
+    n <- as.integer(nrow(Z_sims)/m_sims)
+    Zsims_av <- 0
+    Znets_av <- 0
+    #I_tot <- 0
+    #V_tot <- 0
+    for (i in 1:n) {
+        Zsims_av <- Zsims_av + Z_sims[(1+(i-1)*m_sims):(i*m_sims),]
+        Znets_av <- Znets_av + Z_nets[i,]
+        #res <- eta_MCMC_Handcock(eta, Z_nets[i,], 
+        #                         Z_sims[(1+(i-1)*m_sims):(i*m_sims),])
+        #I_tot <- I_tot + res$I_hat
+        #V_tot <- V_tot + res$V_tilde
+    }
+    res <- eta_MCMC_Handcock(eta, Znets_av/n, Zsims_av/n)
+    I_tot <- res$I_hat
+    V_tot <- res$V_tilde
+    cat('I_tot', diag(I_tot), '\n')
+    cat('V_tot', diag(V_tot), '\n')
+    var_tilde <- solve(I_tot, V_tot, tol=1e-20)
+    var_tilde <- solve(I_tot, t(var_tilde), tol=1e-20)
+    var_tilde
 }
 
 
@@ -217,7 +261,7 @@ fit_eta <- function(train_nets, net_initializer, method, method_args) {
                                        method_args$l_iter, method_args$gamma, 
                                        method_args$sample_per_obs, 
                                        method_args$use_print)
-    }
+    } 
     cat('eta:', eta_pair$eta, '\n')
     eta_pair
 }
@@ -244,11 +288,13 @@ run_test <- function(test_nets, net_initializer, eta_pair, feat_formula, ref_for
     
     # llk increases with number of samples, better to look at average
     llk_avg <- robust.llk.rel(eta, rep(0, length(eta)), Z_nets, Z_sims)
-    eta_var <- eta_MCMCvar(sims_per_val, Z_sims)
+    cat('llk_ratio_rel0:', llk_avg, '\n')
+    eta_var <- ergm_MCMCcov(sims_per_val, eta, Z_sims, Z_nets)
     SE <- sqrt(diag(eta_var))
     pvals <- 2*pnorm(-abs(eta/SE))
+    #SE <- rep(NA, length(eta))
+    #pvals <- rep(NA, length(eta))
 
-    cat('llk_ratio_rel0:', llk_avg, '\n')
     cat('pvals:', pvals, '\n')
 
     list(llk_avg=llk_avg, SE=SE, pvals=pvals)
@@ -375,23 +421,15 @@ add_groups <- function(nets) {
 
 
 set.seed(3)
-fit_and_val('Drama', 'drama_fit', 50, 20, 1000, 'momentum', add_groups,
-            list(feat_formula=~nodemix('char_groups')+
-                               atleast(threshold=3)+
-                               nodesqrtcovar(center=TRUE), 
-                 ref_formula=~Poisson, eta=rep(1,7), l_iter=3, 
-                 beta=0, lr_func=function(x) 1e-2*exp(-(x-1)), 
-                 use_print=TRUE, expect_NA=c(1)))
-# comedy_fit used 9e-3*exp(-(x-1)) learning rate and eta=c(1,1,1,0.5,1,1,1)
+#fit_and_val('Drama', 'test', 50, 20, 1000, 'momentum', add_groups,
+#            list(feat_formula=~nodemix('char_groups')+
+#                               atleast(threshold=3)+
+#                               nodesqrtcovar(center=TRUE), 
+#                 ref_formula=~Poisson, eta=rep(1,7), l_iter=3, 
+#                 beta=0, lr_func=function(x) 1e-2*exp(-(x-1)), 
+#                 use_print=TRUE, expect_NA=c(1)))
+#comedy_fit used 9e-3*exp(-(x-1)) learning rate and eta=c(1,1,1,0.5,1,1,1)
 
 #view_val_sims('drama_fit')
 
-#test_eta('comedy_fit', 20, 1000)
-
-#fit_and_val('Drama', 'test', 10, 5, 1000, 'dist', add_groups,
-#            list(feat_formula=~nodemix('char_groups')+
-#                               ininterval(lower=1, upper=3, open=c(FALSE,FALSE))+
-#                               nodesqrtcovar(center=TRUE), 
-#                 ref_formula=~Poisson, eta=rnorm(7), l_iter=3, 
-#                 gamma=0.5, sample_per_obs=1000, use_print=TRUE,
-#                 expect_NA=c(1)))
+test_eta('test', 20, 2000)
